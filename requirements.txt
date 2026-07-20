@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+sqlalchemy
+neo4j
+python-dotenv
+langchain
+langgraph
+langchain-openai
+langchain-core
+networkx
+scipy
+scikit-learn
+pandas
+langchain-community
+langchain-huggingface 
+huggingface_hub
