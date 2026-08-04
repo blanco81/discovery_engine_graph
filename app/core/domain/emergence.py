@@ -68,21 +68,28 @@ class EmergenceEngine:
         # Forzamos la conversión a bool nativo de Python para que FastAPI pueda serializarlo
         return bool(all_above_threshold and is_stable)
 
-    def save_state(self, baseline_sig: List[float], history: List[float], baseline_nodes: List[str] = None, baseline_edges: List[Tuple[str, str]] = None):
-        """Guarda la línea base, el historial y la topología base en un archivo JSON."""
+    def save_state(self, baseline_sig: List[float], history: List[float], baseline_nodes: List[str] = None, baseline_edges: List[Tuple[str, str]] = None, baseline_semantics: dict = None):
+        """Guarda la línea base, el historial, la topología y la semántica en un JSON."""
         with open(STATE_FILE, 'w') as f:
             json.dump({
                 "baseline_sig": baseline_sig, 
                 "history": history,
                 "baseline_nodes": baseline_nodes or [],
-                "baseline_edges": baseline_edges or []
+                "baseline_edges": baseline_edges or [],
+                "baseline_semantics": baseline_semantics or {}
             }, f)
-        logger.info("Estado del sistema y topología base guardados.")
+        logger.info("Estado del sistema (estructural y semántico) guardado.")
 
-    def load_state(self) -> Tuple[List[float], List[float], List[str], List[Tuple[str, str]]]:
-        """Carga el estado completo. Si no existe, devuelve listas vacías."""
+    def load_state(self) -> Tuple[List[float], List[float], List[str], List[Tuple[str, str]], dict]:
+        """Carga el estado completo. Si no existe, devuelve listas/vacios."""
         if not os.path.exists(STATE_FILE):
-            return [], [], [], []
+            return [], [], [], [], {}
         with open(STATE_FILE, 'r') as f:
             data = json.load(f)
-            return data.get("baseline_sig", []), data.get("history", []), data.get("baseline_nodes", []), data.get("baseline_edges", [])
+            return (
+                data.get("baseline_sig", []), 
+                data.get("history", []), 
+                data.get("baseline_nodes", []), 
+                data.get("baseline_edges", []),
+                data.get("baseline_semantics", {})
+            )
