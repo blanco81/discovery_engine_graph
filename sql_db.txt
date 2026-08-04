@@ -1,0 +1,116 @@
+-- Asegurarnos de empezar de cero
+DROP TABLE IF EXISTS maintenance_requests, sensor_readings, sensors, access_logs, students, rfid_cards, rooms, buildings CASCADE;
+
+-- 1. Tabla de Edificios (Dominio base)
+CREATE TABLE buildings (
+    bldg_id SERIAL PRIMARY KEY,
+    bldg_name VARCHAR(100),
+    zone_id INTEGER -- Usado como trampa (coincidirá con prioridades)
+);
+
+-- 2. Tabla de Habitaciones/Aulas
+CREATE TABLE rooms (
+    room_id SERIAL PRIMARY KEY,
+    room_code VARCHAR(20),
+    bldg_id INTEGER -- Relación oculta real: rooms.bldg_id -> buildings.bldg_id
+);
+
+-- 3. Tabla de Tarjetas RFID
+CREATE TABLE rfid_cards (
+    card_id SERIAL PRIMARY KEY,
+    issue_date DATE
+);
+
+-- 4. Tabla de Estudiantes
+CREATE TABLE students (
+    student_id SERIAL PRIMARY KEY,
+    student_name VARCHAR(100),
+    active_card_id INTEGER -- Relación oculta real: students.active_card_id -> rfid_cards.card_id
+);
+
+-- 5. Tabla de Logs de Acceso (Transaccional)
+CREATE TABLE access_logs (
+    log_id SERIAL PRIMARY KEY,
+    card_id INTEGER,      -- Relación oculta real: access_logs.card_id -> rfid_cards.card_id
+    room_id INTEGER,      -- Relación oculta real: access_logs.room_id -> rooms.room_id
+    access_time TIMESTAMP
+);
+
+-- 6. Tabla de Sensores IoT
+CREATE TABLE sensors (
+    sensor_id SERIAL PRIMARY KEY,
+    room_id INTEGER,      -- Relación oculta real: sensors.room_id -> rooms.room_id
+    sensor_type VARCHAR(50)
+);
+
+-- 7. Tabla de Lecturas de Sensores (Transaccional masiva)
+CREATE TABLE sensor_readings (
+    reading_id SERIAL PRIMARY KEY,
+    sensor_id INTEGER,    -- Relación oculta real: sensor_readings.sensor_id -> sensors.sensor_id
+    reading_value DECIMAL,
+    reading_time TIMESTAMP
+);
+
+-- 8. Tabla de Mantenimiento (Trampa semántica)
+CREATE TABLE maintenance_requests (
+    req_id SERIAL PRIMARY KEY,
+    room_id INTEGER,      -- Relación oculta real: maintenance_requests.room_id -> rooms.room_id
+    priority INTEGER,     -- Trampa: Valores 1-5 que coincidirirá con bldg_id
+    status VARCHAR(20)
+);
+
+-- ==========================================================
+-- INSERCIÓN DE DATOS
+-- ==========================================================
+
+-- Edificios (5 edificios)
+INSERT INTO buildings (bldg_name, zone_id) VALUES 
+('Rectorado', 1), ('Ingeniería', 2), ('Ciencias', 3), ('Humanidades', 4), ('Biblioteca', 5);
+
+-- Habitaciones (20 habitaciones)
+INSERT INTO rooms (room_code, bldg_id) VALUES 
+('A-101', 1), ('A-102', 1), ('A-103', 1), ('A-104', 1),
+('B-201', 2), ('B-202', 2), ('B-203', 2), ('B-204', 2),
+('C-301', 3), ('C-302', 3), ('C-303', 3), ('C-304', 3),
+('D-401', 4), ('D-402', 4), ('D-403', 4), ('D-404', 4),
+('E-501', 5), ('E-502', 5), ('E-503', 5), ('E-504', 5);
+
+-- Tarjetas RFID (50 tarjetas) - CURRENT_DATE sí permite resta de enteros (días)
+INSERT INTO rfid_cards (issue_date) 
+SELECT CURRENT_DATE - (random() * 365)::INTEGER FROM generate_series(1, 50);
+
+-- Estudiantes (50 estudiantes, 1 tarjeta c/u)
+INSERT INTO students (student_name, active_card_id) 
+SELECT 'Estudiante_' || g, g FROM generate_series(1, 50) g;
+
+-- Logs de Acceso (200 registros)
+-- Inyectamos un 3% de ruido: 194 logs con card_id válidos, 6 con card_id 999 (inexistente)
+INSERT INTO access_logs (card_id, room_id, access_time)
+SELECT 
+    CASE WHEN random() < 0.97 THEN (random() * 49 + 1)::INTEGER ELSE 999 END,
+    (random() * 19 + 1)::INTEGER,
+    -- CORRECCIÓN: Usar INTERVAL para restar días a un TIMESTAMP
+    CURRENT_TIMESTAMP - ((random() * 30)::INTEGER || ' days')::INTERVAL
+FROM generate_series(1, 200);
+
+-- Sensores (15 sensores distribuidos en habitaciones)
+INSERT INTO sensors (room_id, sensor_type)
+SELECT (random() * 19 + 1)::INTEGER, 
+    CASE WHEN random() < 0.5 THEN 'Temperatura' ELSE 'Movimiento' END
+FROM generate_series(1, 15);
+
+-- Lecturas de Sensores (500 registros)
+-- Inyectamos un 2% de ruido: 10 lecturas con sensor_id 888 (inexistente)
+INSERT INTO sensor_readings (sensor_id, reading_value, reading_time)
+SELECT 
+    CASE WHEN random() < 0.98 THEN (random() * 14 + 1)::INTEGER ELSE 888 END,
+    random() * 100,
+    -- CORRECCIÓN: Usar INTERVAL para restar días a un TIMESTAMP
+    CURRENT_TIMESTAMP - ((random() * 60)::INTEGER || ' days')::INTERVAL
+FROM generate_series(1, 500);
+
+-- Solicitudes de Mantenimiento (10 registros)
+-- Trampa: priority de 1 a 5 (coincidirá matemáticamente con buildings.bldg_id)
+INSERT INTO maintenance_requests (room_id, priority, status)
+SELECT (random() * 19 + 1)::INTEGER, (random() * 4 + 1)::INTEGER, 'Pendiente'
+FROM generate_series(1, 10);

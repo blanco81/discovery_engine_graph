@@ -23,6 +23,7 @@ class PartialInclusionDependency:
     rho: float                 # Umbral de solapamiento (0, 1]
     violation_count: int       # Número de tuplas que violan la inclusión
     total_count: int           # Total de tuplas evaluadas
+    semantic_label: str = "REFERENCES"  # <- NUEVO: Por defecto REFERENCES, luego la IA lo cambia
 
     def __repr__(self):
         return f"{self.dependent} ⊆_{self.rho:.2f} {self.referenced}"

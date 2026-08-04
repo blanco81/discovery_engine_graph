@@ -1,0 +1,1 @@
+vamos a definir un endpoint para pasar una conexion a un servidor de base de datos sql de forma agnostica y que internamente el sistema resuelva la conexion ya sea una conexion a SQLite, MySQL/MariaDB, Postgresql. Incialmente vamos enforcarnos en esos primeros sistemas de base de datos

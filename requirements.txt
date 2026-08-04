@@ -14,3 +14,8 @@ pandas
 langchain-community
 langchain-huggingface 
 huggingface_hub
+psycopg2-binary 
+pymysql
+asyncpg 
+aiomysql 
+aiosqlite
