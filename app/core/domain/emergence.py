@@ -2,6 +2,13 @@
 import networkx as nx
 import numpy as np
 from typing import List, Tuple
+import json
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+STATE_FILE = "system_state.json"
 
 class EmergenceEngine:
     """
@@ -9,64 +16,73 @@ class EmergenceEngine:
     Basado en teoría espectral y persistencia temporal (Wolfram/Bar-Yam).
     """
 
-    def calculate_spectral_signature(self, graph: nx.Graph, k: int = 5) -> np.ndarray:
+    def calculate_spectral_signature(self, graph: nx.Graph, k: int = 8) -> List[float]:
         """
         Calcula la firma espectral del grafo usando los primeros k autovalores 
-        del Laplaciano. Esto captura la estructura de comunidades y conectividad global.
+        del Laplaciano, INCLUYENDO los ceros. 
+        Los autovalores en 0 representan componentes desconectados (islas).
         """
-        # Asegurar que el grafo sea no dirigido para el cálculo del Laplaciano
         undirected_g = graph.to_undirected()
         
         # Calcular autovalores del Laplaciano
         eigenvalues = nx.laplacian_spectrum(undirected_g, weight='weight')
         
-        # Tomar los k autovalores más pequeños (excluyendo el 0 que es trivial)
-        # Esto representa la estructura macroscópica del grafo
-        non_zero_eigenvalues = np.sort(eigenvalues[eigenvalues > 1e-10])
+        # Ordenar TODOS los autovalores, INCLUYENDO los ceros
+        sorted_eigenvalues = np.sort(eigenvalues)
         
-        # Rellenar con ceros si el grafo es muy pequeño y no hay suficientes autovalores
+        # Tomar los primeros k autovalores (ahora incluimos los ceros)
         signature = np.zeros(k)
-        length = min(len(non_zero_eigenvalues), k)
-        signature[:length] = non_zero_eigenvalues[:length]
+        length = min(len(sorted_eigenvalues), k)
+        signature[:length] = sorted_eigenvalues[:length]
         
-        return signature
+        # Devolver como lista nativa de Python
+        return signature.tolist()
 
-    def calculate_emergence_index(self, current_sig: np.ndarray, historical_sig: np.ndarray) -> float:
+    def calculate_emergence_index(self, current_sig: List[float], historical_sig: List[float]) -> float:
         """
         Calcula el Índice de Emergencia E(P,t).
         Usamos la distancia L2 (Euclidiana) entre el espectro actual y el histórico.
         """
-        # En una implementación completa, aquí se sumarían D_s, D_m, D_t, D_g
-        # Por ahora, nos enfocamos en la desviación estructural espectral (D_s)
-        ds = np.linalg.norm(current_sig - historical_sig)
+        current_np = np.array(current_sig)
+        historical_np = np.array(historical_sig)
         
-        # Normalizamos el índice para que esté entre 0 y 1 aprox
-        # (Añadiendo un pequeño épsilon para evitar división por cero)
-        normalized_ds = ds / (np.linalg.norm(historical_sig) + 1e-10)
+        ds = np.linalg.norm(current_np - historical_np)
+        normalized_ds = ds / (np.linalg.norm(historical_np) + 1e-10)
         
-        return normalized_ds
+        return float(normalized_ds)
 
     def validate_persistence(self, emergence_history: List[float], threshold: float = 0.15, window: int = 3) -> bool:
         """
         Valida si una emergencia es persistente en el tiempo.
         Requerimiento de Pilar 3: No es una anomalía puntual, es un cambio de régimen.
-        
-        - emergence_history: Lista de índices E(P,t) en pasos de tiempo anteriores.
-        - threshold: Umbral θ para considerar que hay una desviación significativa.
-        - window: Número de pasos de tiempo consecutivos que debe mantenerse.
         """
         if len(emergence_history) < window:
             return False
             
-        # Tomamos los últimos 'window' pasos
         recent_history = emergence_history[-window:]
         
-        # Condición 1: Todos los pasos recientes deben superar el umbral
         all_above_threshold = all(e > threshold for e in recent_history)
-        
-        # Condición 2: Coherencia modal (la desviación no debe oscilar locamente)
-        # Calculamos la varianza de los últimos pasos; si es muy alta, es ruido, no emergencia.
         variance = np.var(recent_history)
-        is_stable = variance < (threshold * 0.5) # La varianza debe ser menor que la mitad del umbral
+        is_stable = variance < (threshold * 0.5)
         
-        return all_above_threshold and is_stable
+        # Forzamos la conversión a bool nativo de Python para que FastAPI pueda serializarlo
+        return bool(all_above_threshold and is_stable)
+
+    def save_state(self, baseline_sig: List[float], history: List[float], baseline_nodes: List[str] = None, baseline_edges: List[Tuple[str, str]] = None):
+        """Guarda la línea base, el historial y la topología base en un archivo JSON."""
+        with open(STATE_FILE, 'w') as f:
+            json.dump({
+                "baseline_sig": baseline_sig, 
+                "history": history,
+                "baseline_nodes": baseline_nodes or [],
+                "baseline_edges": baseline_edges or []
+            }, f)
+        logger.info("Estado del sistema y topología base guardados.")
+
+    def load_state(self) -> Tuple[List[float], List[float], List[str], List[Tuple[str, str]]]:
+        """Carga el estado completo. Si no existe, devuelve listas vacías."""
+        if not os.path.exists(STATE_FILE):
+            return [], [], [], []
+        with open(STATE_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get("baseline_sig", []), data.get("history", []), data.get("baseline_nodes", []), data.get("baseline_edges", [])

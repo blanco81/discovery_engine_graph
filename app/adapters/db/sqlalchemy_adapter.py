@@ -1,78 +1,87 @@
-# adapters/db/sqlalchemy_adapter.py
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import Engine
+# app/adapters/db/sqlalchemy_adapter.py
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
+from sqlalchemy import inspect, text
 from typing import List
 import logging
 
 from app.core.domain.models import Column, PartialInclusionDependency
 from app.core.ports.relational_port import RelationalPort
-from app.config.config import settings
 
 logger = logging.getLogger(__name__)
 
 class SqlAlchemyAdapter(RelationalPort):
-    """
-    Adaptador que implementa RelationalPort usando SQLAlchemy.
-    Realiza la conexión a ciegas y descubre pINDs mediante consultas de conteo.
-    """
+    def __init__(self, db_url: str):
+        # Traducir URLs estándar a URLs asíncronas automáticamente
+        if db_url.startswith("postgresql://"):
+            self.db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif db_url.startswith("mysql://") or db_url.startswith("mysql+pymysql://"):
+            self.db_url = db_url.replace("mysql://", "mysql+aiomysql://", 1).replace("mysql+pymysql://", "mysql+aiomysql://", 1)
+        elif db_url.startswith("sqlite:///"):
+            self.db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+        else:
+            self.db_url = db_url
+            
+        self.engine: AsyncEngine = None
 
-    def __init__(self):
-        self.engine: Engine = None
+    async def connect(self) -> None:
+        logger.info(f"Intentando conexión asíncrona al RDBMS...")
+        try:
+            self.engine = create_async_engine(self.db_url)
+            async with self.engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("Conexión exitosa.")
+        except Exception as e:
+            logger.error(f"Error de conexión: {e}")
+            raise ConnectionError(f"No se pudo conectar: {e}")
 
-    def connect(self) -> None:
-        logger.info(f"Conectando a ciegas al RDBMS: {settings.RDBMS_URL}")
-        self.engine = create_engine(settings.RDBMS_URL)
-        with self.engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        logger.info("Conexión exitosa.")
-
-    def disconnect(self) -> None:
+    async def disconnect(self) -> None:
         if self.engine:
-            self.engine.dispose()
+            await self.engine.dispose()
             logger.info("Conexión cerrada.")
 
-    def get_all_columns(self) -> List[Column]:
-        """Usa inspect() de SQLAlchemy para leer el esquema sin modelos ORM."""
+    async def get_all_columns(self) -> List[Column]:
         if not self.engine:
-            raise ConnectionError("No hay conexión a la base de datos.")
+            raise ConnectionError("No hay conexión.")
         
-        inspector = inspect(self.engine)
         columns = []
-        
-        for table_name in inspector.get_table_names():
-            for column_info in inspector.get_columns(table_name):
-                col = Column(
-                    table_name=table_name,
-                    column_name=column_info['name'],
-                    data_type=str(column_info['type'])
-                )
-                columns.append(col)
+        # Usamos run_sync para usar el inspector de SQLAlchemy que aún es síncrono
+        async with self.engine.connect() as conn:
+            def get_tables(sync_conn):
+                insp = inspect(sync_conn)
+                return insp.get_table_names()
+            
+            table_names = await conn.run_sync(get_tables)
+            
+            for table_name in table_names:
+                def get_cols(sync_conn, t_name=table_name):
+                    insp = inspect(sync_conn)
+                    return insp.get_columns(t_name)
+                
+                cols_info = await conn.run_sync(get_cols)
+                for column_info in cols_info:
+                    col = Column(
+                        table_name=table_name,
+                        column_name=column_info['name'],
+                        data_type=str(column_info['type'])
+                    )
+                    columns.append(col)
                 
         logger.info(f"Esquema inferido a ciegas: {len(columns)} columnas encontradas.")
         return columns
 
-    def discover_pinds(self, columns: List[Column], rho_threshold: float = 0.95) -> List[PartialInclusionDependency]:
-        """
-        Implementación de descubrimiento de pINDs.
-        Para cada par (X, Y), calcula: rho = count(X IN Y) / count(X)
-        Si rho >= umbral, se registra como una arista probabilística.
-        """
+    async def discover_pinds(self, columns: List[Column], rho_threshold: float = 0.95) -> List[PartialInclusionDependency]:
         pinds = []
-        
-        # Filtrar tipos de datos válidos para evitar comparar fechas con textos, etc.
-        valid_types = ['VARCHAR', 'TEXT', 'INTEGER', 'BIGINT', 'CHAR', 'UUID']
+        valid_types = ['VARCHAR', 'TEXT', 'INTEGER', 'BIGINT', 'CHAR', 'UUID', 'SERIAL']
         candidate_cols = [c for c in columns if any(vt in c.data_type.upper() for vt in valid_types)]
 
         logger.info(f"Iniciando descubrimiento de pINDs sobre {len(candidate_cols)} columnas candidatas...")
 
         for col_x in candidate_cols:
             for col_y in candidate_cols:
-                # Evitar auto-referencias básicas
                 if col_x.table_name == col_y.table_name and col_x.column_name == col_y.column_name:
                     continue
                 
                 try:
-                    # Consultas SQL para calcular el solapamiento (duplicate-aware)
                     query_match = text(f"""
                         SELECT COUNT(*) FROM "{col_x.table_name}" t1 
                         WHERE t1."{col_x.column_name}" IS NOT NULL 
@@ -81,17 +90,19 @@ class SqlAlchemyAdapter(RelationalPort):
                             WHERE t2."{col_y.column_name}" = t1."{col_x.column_name}"
                         )
                     """)
-                    
                     query_total = text(f"""
                         SELECT COUNT(*) FROM "{col_x.table_name}" 
                         WHERE "{col_x.column_name}" IS NOT NULL
                     """)
 
-                    with self.engine.connect() as conn:
-                        match_count = conn.execute(query_match).scalar()
-                        total_count = conn.execute(query_total).scalar()
+                    async with self.engine.connect() as conn:
+                        result_match = await conn.execute(query_match)
+                        result_total = await conn.execute(query_total)
+                        
+                        match_count = result_match.scalar()
+                        total_count = result_total.scalar()
 
-                    if total_count > 0:
+                    if total_count and total_count > 0:
                         rho = match_count / total_count
                         violations = total_count - match_count
                         
@@ -105,9 +116,8 @@ class SqlAlchemyAdapter(RelationalPort):
                             )
                             pinds.append(pind)
                             
-                except Exception as e:
-                    # Silenciar errores de tipo de dato incompatible en SQL y continuar
+                except Exception:
                     continue
                     
-        logger.info(f"Descubrimiento completado. {len(pinds)} pINDs encontradas con ρ >= {rho_threshold}.")
+        logger.info(f"Descubrimiento completado. {len(pinds)} pINDs encontradas.")
         return pinds

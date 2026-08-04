@@ -148,7 +148,7 @@ NEO4J_PASSWORD=tu_password
 
 # --- Fase C: Orquestación de Agentes (LLM) ---
 LLM_PROVIDER=groq
-LLM_MODEL_NAME=llama-3.3-70b-versatile
+LLM_MODEL_NAME=llama-3
 LLM_API_KEY=gsk_tu_api_key_de_groq_aqui
 
 # --- API ---
