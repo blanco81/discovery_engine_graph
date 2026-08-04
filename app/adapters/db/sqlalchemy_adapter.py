@@ -123,9 +123,7 @@ class SqlAlchemyAdapter(RelationalPort):
         return pinds
 
     async def get_categorical_distributions(self, columns: List[Column], sample_size: int = 1000) -> Dict[str, Dict[str, float]]:
-        """
-        Extrae la distribución de probabilidad de las columnas categóricas (TEXT/VARCHAR).
-        """
+        """Extrae la distribución de probabilidad de las columnas categóricas (TEXT/VARCHAR)."""
         distributions = {}
         cat_cols = [c for c in columns if 'VARCHAR' in c.data_type.upper() or 'TEXT' in c.data_type.upper()]
         
@@ -145,7 +143,6 @@ class SqlAlchemyAdapter(RelationalPort):
                 if rows:
                     total = sum([row[1] for row in rows])
                     if total > 0:
-                        # Formato: { "categoria": probabilidad }
                         dist = {str(row[0]): row[1] / total for row in rows}
                         distributions[f"{col.table_name}.{col.column_name}"] = dist
             except Exception:
