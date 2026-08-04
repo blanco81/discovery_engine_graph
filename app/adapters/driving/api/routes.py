@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from app.core.services.inference_service import InferenceService
+from app.adapters.db.state_adapter import InternalStateAdapter
 
 router = APIRouter()
 
@@ -27,3 +28,12 @@ async def run_discovery(request: DiscoveryRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+
+@router.post("/api/v1/baseline/reset")
+async def reset_baseline(request: DiscoveryRequest):
+    """Resetea la línea base del motor para una base de datos específica."""
+    state_adapter = InternalStateAdapter()
+    await state_adapter.init_db()
+    await state_adapter.reset_state(request.db_url)
+    return {"message": f"Línea base reseteada exitosamente para {request.db_url}. El sistema aprenderá una nueva normalidad en la próxima ejecución."}
+
