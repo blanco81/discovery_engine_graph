@@ -199,41 +199,47 @@ class LangGraphAdapter(OrchestratorPort):
         return final_pinds
 
     async def generate_report(self, pinds: List[PartialInclusionDependency], emergence_index: float, is_emergence: bool, emergence_details: str = "") -> str:
-        pinds_str = "\n".join([f"- {p.dependent.table_name}.{p.dependent.column_name} -[{p.semantic_label}]-> {p.referenced.table_name}.{p.referenced.column_name} (Fuerza: {p.rho})" for p in pinds])
-        
+        # En lugar de mostrar la matemática cruda, la traducimos a conceptos de riesgo
         if is_emergence:
             tone_directive = f"""
-            ¡ALERTA CRÍTICA! Se ha detectado un PATRÓN EMERGENTE PERSISTENTE.
-            El sistema ha cambiado de régimen macroscópico. El tono del informe debe ser de alerta temprana.
+            ¡ALERTA CRÍTICA DE NEGOCIO! Se ha detectado un Patrón Emergente Persistente.
+            El sistema ha cambiado de régimen. El tono debe ser de alerta temprana para directivos.
             
+            Evidencia Interna (TRADÚCELA a lenguaje de negocio, NO uses términos matemáticos):
             {emergence_details}
             
-            Instrucciones de Análisis (OBLIGATORIO):
-            1. NO uses frases genéricas como "requiere atención". 
-            2. Basándote ESTRICTAMENTE en la Evidencia del Cambio de Régimen proporcionada arriba, explica QUÉ nueva estructura apareció.
-            3. Explica CÓMO esta nueva estructura se ancla (Nexus) a las operaciones previas del negocio.
-            4. Infiere el IMPACTO DE NEGOCIO basándote en los nombres de las tablas nuevas.
+            Instrucciones de Redacción OBLIGATORIAS (Usa este formato exacto):
+            1. 🚨 **Estado del Sistema:** (1 frase indicando alerta de cambio operativo).
+            2. 🔍 **Hallazgo Principal:** (Explica en español simple qué surgió. Si hay 'Nodos Nuevos', diles que apareció una nueva área de negocio/proceso. Si hay 'Alerta Semántica', diles que el comportamiento de los datos existentes mutó drásticamente, como un brote o una falla masiva).
+            3. 🏢 **Impacto en la Operación:** (Basado en los nombres de las tablas, explica cómo afecta esto a la vida real: estudiantes, pacientes, recursos, etc.).
+            4. 📋 **Recomendación Inmediata:** (1 o 2 acciones concretas que el gerente debería hacer hoy).
             """
         else:
-            tone_directive = "El sistema se encuentra en un estado estable. Resume las estructuras monitoreadas sin alarmar."
+            tone_directive = """
+            El sistema se encuentra ESTABLE. 
+            Redacta un resumen ejecutivo corto y tranquilizador.
+            1. ✅ **Estado del Sistema:** (Indica que la operación está normal).
+            2. 🔍 **Monitoreo Activo:** (Menciona brevemente cuántas estructuras de datos se están vigilando).
+            """
 
-        prompt = f"""
-        Eres el Agente Documentador de un sistema de descubrimiento de complejidad. 
-        Datos descubiertos a ciegas (Relaciones validadas en el grafo actual):
-        {pinds_str}
+        # Simplificamos la lista de relaciones para que el LLM no se enrede
+        pinds_str = "\n".join([f"- {p.dependent.table_name} se conecta con {p.referenced.table_name}" for p in pinds[:10]])
         
-        Estado del Sistema:
-        - Índice de Emergencia E(P,t): {emergence_index:.4f}
-        - ¿Es un Patrón Emergente Persistente?: {'SÍ' if is_emergence else 'NO'}
+        prompt = f"""
+        Eres el Analista Principal de Inteligencia de Datos para un Directorio Ejecutivo.
+        Tu trabajo es traducir descubrimientos técnicos en informes pragmáticos de 1 página.
+        
+        Contexto de Datos Vigilados:
+        {pinds_str}
         
         Directriz de Redacción:
         {tone_directive}
         
-        Genera un informe breve (3-4 párrafos) analizando el estado actual del pozo de datos.
+        NO menciones índices matemáticos, ni Jensen-Shannon, ni autovalores, ni pINDs. Habla de "procesos", "comportamiento de datos" y "áreas de negocio".
         """
         
         msg = await self.llm.ainvoke([
-            SystemMessage(content="Eres un analista de datos senior redactando un informe de inteligencia para dirección."),
+            SystemMessage(content="Eres un Chief Data Officer redactando un informe ejecutivo pragmático."),
             HumanMessage(content=prompt)
         ])
         return msg.content

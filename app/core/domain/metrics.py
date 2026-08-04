@@ -2,6 +2,8 @@
 import networkx as nx
 import numpy as np
 from scipy.stats import skew, kurtosis
+from scipy.spatial.distance import jensenshannon
+from typing import Dict, List
 
 def calculate_netsimile(graph: nx.Graph) -> np.ndarray:
     """
@@ -46,3 +48,23 @@ def calculate_netsimile(graph: nx.Graph) -> np.ndarray:
         ])
         
     return np.array(signature)
+
+def calculate_js_distance(dist1: Dict[str, float], dist2: Dict[str, float]) -> float:
+    """
+    Calcula la distancia de Jensen-Shannon entre dos distribuciones categóricas.
+    Las distribuciones deben ser diccionarios {categoria: probabilidad}.
+    """
+    # Obtener todas las categorías posibles (unión de ambas distribuciones)
+    all_categories = set(dist1.keys()).union(set(dist2.keys()))
+    
+    # Crear vectores alineados; si una categoría no existe, su probabilidad es 0
+    p1 = np.array([dist1.get(cat, 0.0) for cat in all_categories])
+    p2 = np.array([dist2.get(cat, 0.0) for cat in all_categories])
+    
+    # Normalizar para asegurar que sumen 1 (por si acaso)
+    p1 = p1 / np.sum(p1) if np.sum(p1) > 0 else p1
+    p2 = p2 / np.sum(p2) if np.sum(p2) > 0 else p2
+    
+    # Calcular distancia JS (base 2 para que el valor esté entre 0 y 1)
+    js_dist = jensenshannon(p1, p2, base=2.0)
+    return float(js_dist)
