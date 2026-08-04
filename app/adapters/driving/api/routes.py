@@ -1,11 +1,13 @@
+# app/adapters/driving/api/routes.py
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from app.core.services.inference_service import InferenceService
-from app.adapters.db.state_adapter import InternalStateAdapter
 
 router = APIRouter()
 
+# Modelo de entrada para la API
 class DiscoveryRequest(BaseModel):
     db_url: str
     rho_threshold: Optional[float] = 0.90
@@ -16,14 +18,21 @@ async def read_root():
 
 @router.post("/api/v1/discovery/run")
 async def run_discovery(request: DiscoveryRequest):
+    """
+    Ejecuta el pipeline de descubrimiento sobre un RDBMS externo.
+    Soporta SQLite, MySQL/MariaDB y PostgreSQL.
+    """
     service = InferenceService()
+    
     try:
-        # Ahora esperamos (await) la ejecución asíncrona
         result = await service.run_discovery_pipeline(
             db_url=request.db_url,
             rho_threshold=request.rho_threshold
         )
-        return {"message": "Pipeline completado", "data": result}
+        return {
+            "message": "Pipeline completado",
+            "data": result
+        }
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -32,8 +41,224 @@ async def run_discovery(request: DiscoveryRequest):
 @router.post("/api/v1/baseline/reset")
 async def reset_baseline(request: DiscoveryRequest):
     """Resetea la línea base del motor para una base de datos específica."""
+    from app.adapters.db.state_adapter import InternalStateAdapter
     state_adapter = InternalStateAdapter()
     await state_adapter.init_db()
     await state_adapter.reset_state(request.db_url)
     return {"message": f"Línea base reseteada exitosamente para {request.db_url}. El sistema aprenderá una nueva normalidad en la próxima ejecución."}
 
+@router.get("/dashboard", response_class=HTMLResponse)
+async def get_dashboard():
+    return """
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Motor de Descubrimiento de Complejidad</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.27.0/cytoscape.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body { font-family: 'Inter', sans-serif; }
+            #cy { height: 500px; width: 100%; background-color: #f8fafc; border-radius: 0.5rem; border: 1px solid #e2e8f0; }
+        </style>
+    </head>
+    <body class="bg-gray-100 text-gray-800">
+
+        <div class="container mx-auto p-6">
+            <!-- Cabecera -->
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-bold text-indigo-900">🧠 Motor de Descubrimiento de Complejidad</h1>
+                <div class="flex gap-4">
+                    <input id="dbUrl" type="text" placeholder="postgresql://user:pass@localhost:5432/db" class="border p-2 rounded w-96 text-sm">
+                    <button onclick="runDiscovery()" class="bg-indigo-600 text-white px-4 py-2 rounded font-bold hover:bg-indigo-700">Ejecutar</button>
+                    <button onclick="resetBaseline()" class="bg-gray-500 text-white px-4 py-2 rounded font-bold hover:bg-gray-600">Resetear</button>
+                </div>
+            </div>
+
+            <!-- Semáforo de Alerta -->
+            <div id="alertBox" class="bg-green-100 text-green-800 p-4 rounded-lg mb-6 text-center font-bold text-xl transition-all">
+                ✅ Sistema Estable - Esperando ejecución...
+            </div>
+
+            <!-- Cuadrantes (Layout 3 Columnas) -->
+            <div class="grid grid-cols-3 gap-6 mb-6">
+                <!-- Grafo (Ocupa 2 columnas) -->
+                <div class="col-span-2 bg-white p-4 rounded-lg shadow border">
+                    <h2 class="text-xl font-semibold mb-2 text-gray-700">Grafo de Conocimiento (Ontología Emergente)</h2>
+                    <div id="cy"></div>
+                </div>
+                <!-- Serie Temporal (Ocupa 1 columna) -->
+                <div class="col-span-1 bg-white p-4 rounded-lg shadow border">
+                    <h2 class="text-xl font-semibold mb-2 text-gray-700">Serie Temporal de Emergencia</h2>
+                    <canvas id="emergenceChart" height="400"></canvas>
+                </div>
+            </div>
+
+            <!-- Evidencia y Reporte -->
+            <div class="grid grid-cols-3 gap-6">
+                <!-- Métricas -->
+                <div class="bg-white p-4 rounded-lg shadow border">
+                    <h2 class="text-xl font-semibold mb-2 text-gray-700">Métricas del Sistema</h2>
+                    <div id="metrics" class="text-sm space-y-2 text-gray-600">
+                        <p>Ejecuta el motor para ver las métricas.</p>
+                    </div>
+                </div>
+                <!-- Reporte IA -->
+                <div class="col-span-2 bg-white p-4 rounded-lg shadow border">
+                    <h2 class="text-xl font-semibold mb-2 text-gray-700">Informe Ejecutivo IA</h2>
+                    <div id="report" class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded border">
+                        El informe aparecerá aquí...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let chart;
+            const ctx = document.getElementById('emergenceChart').getContext('2d');
+            
+            // Inicializar gráfico vacío
+            function initChart() {
+                if(chart) chart.destroy();
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: [], datasets: [{ label: 'E(P,t)', data: [], borderColor: 'rgb(75, 85, 99)', tension: 0.1, fill: true }] },
+                    options: { scales: { y: { beginAtZero: true } } }
+                });
+            }
+            initChart();
+
+            async function runDiscovery() {
+                const dbUrl = document.getElementById('dbUrl').value;
+                if(!dbUrl) return alert("Por favor ingresa la URL de la BD");
+                
+                document.getElementById('alertBox').textContent = "⏳ Procesando pipeline matemático y agentes IA...";
+                document.getElementById('alertBox').className = "bg-yellow-100 text-yellow-800 p-4 rounded-lg mb-6 text-center font-bold text-xl animate-pulse";
+
+                try {
+                    const res = await fetch('/api/v1/discovery/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ db_url: dbUrl, rho_threshold: 0.9 })
+                    });
+                    const data = await res.json();
+                    if(!res.ok) throw new Error(data.detail || "Error en la API");
+                    
+                    renderData(data.data);
+                } catch (e) {
+                    document.getElementById('alertBox').textContent = "❌ Error: " + e.message;
+                    document.getElementById('alertBox').className = "bg-red-100 text-red-800 p-4 rounded-lg mb-6 text-center font-bold text-xl";
+                }
+            }
+
+            async function resetBaseline() {
+                const dbUrl = document.getElementById('dbUrl').value;
+                if(!dbUrl) return alert("Por favor ingresa la URL de la BD");
+                
+                const res = await fetch('/api/v1/baseline/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ db_url: dbUrl })
+                });
+                alert("Línea base reseteada. Ejecuta de nuevo para aprender la nueva normalidad.");
+            }
+
+            function renderData(data) {
+                // 1. Semáforo
+                const ept = data.emergence_index;
+                const isEm = data.is_emergence;
+                const alert = document.getElementById('alertBox');
+                
+                if(isEm) {
+                    alert.textContent = `🚨 ALERTA: Cambio de Régimen Detectado | E(P,t): ${ept.toFixed(4)}`;
+                    alert.className = "bg-red-100 text-red-800 p-4 rounded-lg mb-6 text-center font-bold text-xl animate-pulse";
+                } else if(ept > 0.05) {
+                    alert.textContent = `⏳ Anomalía Detectada (Esperando Persistencia) | E(P,t): ${ept.toFixed(4)}`;
+                    alert.className = "bg-orange-100 text-orange-800 p-4 rounded-lg mb-6 text-center font-bold text-xl";
+                } else {
+                    alert.textContent = `✅ Sistema Estable | E(P,t): ${ept.toFixed(4)}`;
+                    alert.className = "bg-green-100 text-green-800 p-4 rounded-lg mb-6 text-center font-bold text-xl";
+                }
+
+                // 2. Métricas
+                document.getElementById('metrics').innerHTML = `
+                    <p><b>Relaciones Matemáticas (pINDs):</b> ${data.total_raw_pinds}</p>
+                    <p><b>Relaciones Validadas (IA):</b> ${data.total_validated_pinds}</p>
+                    <p><b>Índice de Emergencia:</b> ${ept.toFixed(4)}</p>
+                    <p><b>Umbral (θ):</b> 0.1500</p>
+                `;
+
+                // 3. Reporte
+                document.getElementById('report').innerText = data.executive_report;
+
+                // 4. Grafo (Cytoscape)
+                const elements = [];
+                const nodes = new Set();
+                data.validated_relationships.forEach(rel => {
+                    const match = rel.match(/(\\w+)\\.\\w+ -\\[(\\w+)\\]-> (\\w+)\\.\\w+.*/);
+                    if(match) {
+                        const [_, t1, label, t2] = match;
+                        if(!nodes.has(t1)) { nodes.add(t1); elements.push({ data: { id: t1, label: t1 } }); }
+                        if(!nodes.has(t2)) { nodes.add(t2); elements.push({ data: { id: t2, label: t2 } }); }
+                        elements.push({ data: { source: t1, target: t2, label: label } });
+                    }
+                });
+
+                cytoscape({
+                    container: document.getElementById('cy'),
+                    elements: elements,
+                    style: [
+                        { 
+                            selector: 'node', 
+                            style: { 
+                                'background-color': '#4f46e5', 
+                                'label': 'data(label)', 
+                                'color': '#1e293b', 
+                                'text-valign': 'bottom', 
+                                'text-halign': 'center',
+                                'font-size': '10px',
+                                'font-weight': 'bold',
+                                'width': 25, 
+                                'height': 25 
+                            } 
+                        },
+                        { 
+                            selector: 'edge', 
+                            style: { 
+                                'width': 2, 
+                                'line-color': '#94a3b8', 
+                                'target-arrow-color': '#94a3b8', 
+                                'target-arrow-shape': 'triangle', 
+                                'curve-style': 'bezier', 
+                                'label': 'data(label)', 
+                                'font-size': '8px', 
+                                'color': '#64748b', 
+                                'text-rotation': 'autorotate',
+                                'text-background-color': '#ffffff',
+                                'text-background-opacity': 0.8,
+                                'text-background-padding': '1px'
+                            } 
+                        }
+                    ],
+                    layout: { name: 'cose' }
+                });
+
+                // 5. Gráfico (Chart.js)
+                initChart();
+                chart.data.labels.push('Actual');
+                chart.data.datasets[0].data.push(ept);
+                chart.data.datasets.push({
+                    label: 'Umbral θ (0.15)',
+                    data: [0.15],
+                    borderColor: 'rgb(220, 38, 38)',
+                    borderDash: [5, 5],
+                    fill: false
+                });
+                chart.update();
+            }
+        </script>
+    </body>
+    </html>
+    """

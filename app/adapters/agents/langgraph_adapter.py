@@ -257,12 +257,10 @@ class LangGraphAdapter(OrchestratorPort):
         prompt = f"""
         Eres un ontólogo experto. Analiza las siguientes relaciones descubiertas en una base de datos e infiere el VERBO que mejor represente la relación semántica de negocio (en INGLÉS, EN MAYÚSCULAS y sin espacios, ej: BELONGS_TO).
         
-        Ejemplos de inferencia:
-        - patients.doctor_id -> doctors.id : TREATED_BY
-        - rooms.bldg_id -> buildings.bldg_id : LOCATED_IN
-        - students.active_card_id -> rfid_cards.card_id : OWNS
-        - sensor_readings.sensor_id -> sensors.sensor_id : GENERATED_BY
-        - transactions.account_id -> accounts.id : BELONGS_TO
+        REGLA CRÍTICA: Olvida ejemplos anteriores. Analiza ESTRICTAMENTE el significado de los nombres de las tablas actuales. 
+        - Si es retail/ventas: usa PLACED_BY, CONTAINS, PAID_FOR, SHIPPED_TO.
+        - Si es spatial/físico: usa LOCATED_IN.
+        - Si es de identidad: usa OWNS, ASSIGNED_TO.
         
         Relaciones a evaluar:
         {pinds_text}
@@ -274,7 +272,7 @@ class LangGraphAdapter(OrchestratorPort):
         try:
             json_llm = self.llm.bind(response_format={"type": "json_object"})
             msg = await json_llm.ainvoke([
-                SystemMessage(content="Eres un experto en modelado ontológico. Devuelves JSON estricto."),
+                SystemMessage(content="Eres un experto en modelado ontológico. Devuelves JSON estricto. No alucines verbos espaciales en dominios de ventas."),
                 HumanMessage(content=prompt)
             ])
             
@@ -287,7 +285,6 @@ class LangGraphAdapter(OrchestratorPort):
             result = json.loads(match.group(0))
             ontology_mappings = result.get("ontology", [])
             
-            # Actualizar el campo semantic_label en los objetos pIND
             for item in ontology_mappings:
                 idx = item.get("index")
                 label = item.get("label", "REFERENCES")

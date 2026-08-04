@@ -19,3 +19,7 @@ pymysql
 asyncpg 
 aiomysql 
 aiosqlite
+streamlit 
+requests 
+plotly 
+streamlit-agraph
