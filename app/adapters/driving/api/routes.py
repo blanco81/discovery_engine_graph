@@ -40,12 +40,13 @@ async def run_discovery(request: DiscoveryRequest):
 
 @router.post("/api/v1/baseline/reset")
 async def reset_baseline(request: DiscoveryRequest):
-    """Resetea la línea base del motor para una base de datos específica."""
+    """Activa la bandera de reset. El sistema asimilará la nueva normalidad en la próxima ejecución manteniendo el historial."""
     from app.adapters.db.state_adapter import InternalStateAdapter
     state_adapter = InternalStateAdapter()
     await state_adapter.init_db()
-    await state_adapter.reset_state(request.db_url)
-    return {"message": f"Línea base reseteada exitosamente para {request.db_url}. El sistema aprenderá una nueva normalidad en la próxima ejecución."}
+    await state_adapter.request_reset(request.db_url)
+    return {"message": "Reset solicitado. El sistema aprenderá la nueva normalidad en la próxima ejecución manteniendo el historial gráfico."}
+
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def get_dashboard():
@@ -59,6 +60,9 @@ async def get_dashboard():
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.27.0/cytoscape.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <!-- Añadimos el plugin de Zoom y su dependencia Hammer.js -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
         <style>
             body { font-family: 'Inter', sans-serif; }
             #cy { height: 500px; width: 100%; background-color: #f8fafc; border-radius: 0.5rem; border: 1px solid #e2e8f0; }
@@ -82,17 +86,20 @@ async def get_dashboard():
                 ✅ Sistema Estable - Esperando ejecución...
             </div>
 
-            <!-- Cuadrantes (Layout 3 Columnas) -->
-            <div class="grid grid-cols-3 gap-6 mb-6">
-                <!-- Grafo (Ocupa 2 columnas) -->
-                <div class="col-span-2 bg-white p-4 rounded-lg shadow border">
+            <!-- Cuadrantes (Layout 2 Columnas Igualadas) -->
+            <div class="grid grid-cols-2 gap-6 mb-6">
+                <!-- Grafo -->
+                <div class="bg-white p-4 rounded-lg shadow border">
                     <h2 class="text-xl font-semibold mb-2 text-gray-700">Grafo de Conocimiento (Ontología Emergente)</h2>
                     <div id="cy"></div>
                 </div>
-                <!-- Serie Temporal (Ocupa 1 columna) -->
-                <div class="col-span-1 bg-white p-4 rounded-lg shadow border">
+                <!-- Serie Temporal Ampliada -->
+                <div class="bg-white p-4 rounded-lg shadow border">
                     <h2 class="text-xl font-semibold mb-2 text-gray-700">Serie Temporal de Emergencia</h2>
-                    <canvas id="emergenceChart" height="400"></canvas>
+                    <p class="text-xs text-gray-400 mb-2">💡 Usa la rueda del ratón para hacer zoom y arrastra para desplazarte.</p>
+                    <div style="height: 450px;">
+                        <canvas id="emergenceChart"></canvas>
+                    </div>
                 </div>
             </div>
 
@@ -115,34 +122,40 @@ async def get_dashboard():
             </div>
         </div>
 
-        <script>
+                <script>
             let chart;
-            let emergenceHistory = []; // Acumulador global para la serie temporal
-            let iterationCount = 0;    // Contador de ejecuciones
             const ctx = document.getElementById('emergenceChart').getContext('2d');
             
-            // Inicializar gráfico con configuración mejorada
-            function initChart() {
+            // Registramos el plugin de zoom explícitamente para asegurar que funcione
+            if (window.ChartZoom) {
+                Chart.register(ChartZoom);
+            }
+            
+            function initChart(historyData = []) {
                 if(chart) chart.destroy();
+                
+                let labels = historyData.map((_, i) => `t=${i}`);
+                let data = historyData;
+                let thresholdData = new Array(data.length).fill(0.15);
+                
                 chart = new Chart(ctx, {
                     type: 'line',
                     data: { 
-                        labels: [], 
+                        labels: labels, 
                         datasets: [
                             { 
                                 label: 'E(P,t) - Índice de Emergencia', 
-                                data: [], 
+                                data: data, 
                                 borderColor: 'rgb(79, 70, 229)', 
                                 backgroundColor: 'rgba(79, 70, 229, 0.2)',
                                 tension: 0.3, 
                                 fill: true,
                                 borderWidth: 3,
-                                pointRadius: 5,
-                                pointBackgroundColor: 'rgb(79, 70, 229)'
+                                pointRadius: 4
                             },
                             {
                                 label: 'Umbral θ (0.15)',
-                                data: [],
+                                data: thresholdData,
                                 borderColor: 'rgb(220, 38, 38)',
                                 borderDash: [5, 5],
                                 fill: false,
@@ -152,19 +165,34 @@ async def get_dashboard():
                         ] 
                     },
                     options: { 
+                        maintainAspectRatio: false,
                         scales: { 
-                            y: { beginAtZero: true, suggestedMax: 0.3 } // Max sugerido para ver bien el umbral
+                            x: { title: { display: true, text: 'Iteración (Tiempo)' } },
+                            y: { beginAtZero: true, suggestedMax: 0.3, title: { display: true, text: 'Magnitud de Emergencia' } }
                         },
                         plugins: {
-                            legend: {
-                                display: true,
-                                position: 'bottom',
-                                labels: { font: { size: 10 } }
+                            legend: { display: true, position: 'bottom', labels: { font: { size: 10 } } },
+                            zoom: {
+                                pan: {
+                                    enabled: true,
+                                    mode: 'x',
+                                    // Eliminamos el modifierKey para que arrastre con clic normal
+                                },
+                                zoom: {
+                                    wheel: { enabled: true, speed: 0.1 },
+                                    pinch: { enabled: true },
+                                    mode: 'x',
+                                }
                             }
                         }
                     }
                 });
             }
+            
+            function resetZoom() {
+                if(chart) chart.resetZoom();
+            }
+
             initChart();
 
             async function runDiscovery() {
@@ -199,12 +227,7 @@ async def get_dashboard():
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ db_url: dbUrl })
                 });
-                
-                // Limpiar la gráfica cuando se resetea la línea base
-                emergenceHistory = [];
-                iterationCount = 0;
-                initChart();
-                alert("Línea base reseteada. La gráfica se ha limpiado. Ejecuta de nuevo para aprender la nueva normalidad.");
+                alert("Reset solicitado. En la próxima ejecución, el sistema asimilará la nueva normalidad y la gráfica caerá a 0 manteniendo el historial.");
             }
 
             function renderData(data) {
@@ -230,7 +253,6 @@ async def get_dashboard():
                     <p><b>Relaciones Validadas (IA):</b> ${data.total_validated_pinds}</p>
                     <p><b>Índice de Emergencia Actual:</b> ${ept.toFixed(4)}</p>
                     <p><b>Umbral (θ):</b> 0.1500</p>
-                    <p><b>Iteración Actual:</b> t=${iterationCount + 1}</p>
                 `;
 
                 // 3. Reporte
@@ -253,53 +275,15 @@ async def get_dashboard():
                     container: document.getElementById('cy'),
                     elements: elements,
                     style: [
-                        { 
-                            selector: 'node', 
-                            style: { 
-                                'background-color': '#4f46e5', 
-                                'label': 'data(label)', 
-                                'color': '#1e293b', 
-                                'text-valign': 'bottom', 
-                                'text-halign': 'center',
-                                'font-size': '10px',
-                                'font-weight': 'bold',
-                                'width': 25, 
-                                'height': 25 
-                            } 
-                        },
-                        { 
-                            selector: 'edge', 
-                            style: { 
-                                'width': 2, 
-                                'line-color': '#94a3b8', 
-                                'target-arrow-color': '#94a3b8', 
-                                'target-arrow-shape': 'triangle', 
-                                'curve-style': 'bezier', 
-                                'label': 'data(label)', 
-                                'font-size': '8px', 
-                                'color': '#64748b', 
-                                'text-rotation': 'autorotate',
-                                'text-background-color': '#ffffff',
-                                'text-background-opacity': 0.8,
-                                'text-background-padding': '1px'
-                            } 
-                        }
+                        { selector: 'node', style: { 'background-color': '#4f46e5', 'label': 'data(label)', 'color': '#1e293b', 'text-valign': 'bottom', 'text-halign': 'center', 'font-size': '10px', 'font-weight': 'bold', 'width': 25, 'height': 25 } },
+                        { selector: 'edge', style: { 'width': 2, 'line-color': '#94a3b8', 'target-arrow-color': '#94a3b8', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'label': 'data(label)', 'font-size': '8px', 'color': '#64748b', 'text-rotation': 'autorotate', 'text-background-color': '#ffffff', 'text-background-opacity': 0.8, 'text-background-padding': '1px' } }
                     ],
                     layout: { name: 'cose' }
                 });
 
-                // 5. Gráfico (Chart.js) - Actualización de la Serie Temporal
-                iterationCount++;
-                emergenceHistory.push(ept);
-                
-                // Actualizar labels y datos del gráfico sin destruirlo
-                chart.data.labels.push(`t=${iterationCount}`);
-                chart.data.datasets[0].data = emergenceHistory;
-                
-                // Mantener la línea del umbral del mismo tamaño que el historial
-                chart.data.datasets[1].data = new Array(emergenceHistory.length).fill(0.15);
-                
-                chart.update();
+                // 5. Gráfico (Chart.js) 
+                let hist = data.emergence_history || [];
+                initChart(hist);
             }
         </script>
     </body>
