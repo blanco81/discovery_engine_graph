@@ -33,20 +33,16 @@ class InferenceService:
         
         # Extraer distribuciones categóricas para la Firma Semántica (F_m)
         semantic_distributions = await db_adapter.get_categorical_distributions(columns)
-        
         await db_adapter.disconnect()
         
         # 2. Validación Multi-Agente (Fase B - LLM)
         validated_pinds = await self.orchestrator_adapter.validate_pinds(raw_pinds)
-        
         ontologized_pinds = []
         graph = None
         
         # 3. Materialización y Extracción del Grafo (Neo4j)
         if validated_pinds:
-            # Generar Ontología Emergente (Módulo C)
             ontologized_pinds = await self.orchestrator_adapter.generate_ontology(validated_pinds)
-            
             await self.neo4j_adapter.connect()
             await self.neo4j_adapter.save_pinds(ontologized_pinds)
             graph = await self.neo4j_adapter.get_networkx_graph()
@@ -60,16 +56,27 @@ class InferenceService:
         if graph and graph.number_of_nodes() > 0:
             current_sig = self.emergence_engine.calculate_spectral_signature(graph)
             
-            # Cargar estado desde la Metabase interna usando la db_url
-            baseline_sig, history, baseline_nodes, baseline_edges, baseline_semantics = await self.state_adapter.load_state(db_url)
+            # Cargar estado (6 valores)
+            baseline_sig, history, baseline_nodes, baseline_edges, baseline_semantics, needs_reset = await self.state_adapter.load_state(db_url)
             
             current_nodes = list(graph.nodes())
             current_edges = [(u, v) for u, v in graph.edges()]
             
-            # Si no hay línea base (primera ejecución para esta BD), la guardamos
-            if not baseline_sig:
+            # LÓGICA DE RESET (Caja Negra)
+            if needs_reset == 1:
+                logger.info(f"Reset solicitado para {db_url}. Asimilando nueva normalidad y manteniendo historial.")
+                history.append(0.0)
+                await self.state_adapter.save_state(db_url, current_sig, history, current_nodes, current_edges, semantic_distributions, needs_reset=0)
+                emergence_index = 0.0
+                
+            # PRIMERA EJECUCIÓN (Sin línea base previa)
+            elif not baseline_sig:
                 logger.info(f"Primera ejecución para {db_url}. Guardando línea base estructural y semántica.")
-                await self.state_adapter.save_state(db_url, current_sig, [0.0], current_nodes, current_edges, semantic_distributions)
+                history.append(0.0)
+                await self.state_adapter.save_state(db_url, current_sig, history, current_nodes, current_edges, semantic_distributions, needs_reset=0)
+                emergence_index = 0.0
+                
+            # EJECUCIÓN NORMAL (Vigilancia)
             else:
                 # 4.1 Desviación Estructural (D_s)
                 ds = self.emergence_engine.calculate_emergence_index(current_sig, baseline_sig)
@@ -97,7 +104,6 @@ class InferenceService:
                     new_nodes = set(current_nodes) - set(baseline_nodes)
                     removed_nodes = set(baseline_nodes) - set(current_nodes)
                     
-                    # Identificar el "Nexus Node" (Nodo viejo que se conecta con nodos nuevos)
                     nexus_nodes = set()
                     for u, v in graph.edges():
                         if u in new_nodes and v in baseline_nodes: nexus_nodes.add(v)
@@ -116,15 +122,15 @@ class InferenceService:
                     
                     logger.info(f"Delta Topológico: Nuevos={list(new_nodes)}, Nexus={list(nexus_nodes)}")
                 
-                # Guardar estado para la próxima ejecución
-                # Si no hay emergencia y el sistema se estabilizó, aprende el nuevo régimen normal
                 if not is_emergence and emergence_index < 0.05:
-                    await self.state_adapter.save_state(db_url, current_sig, history, current_nodes, current_edges, semantic_distributions)
+                    await self.state_adapter.save_state(db_url, current_sig, history, current_nodes, current_edges, semantic_distributions, needs_reset=0)
                 else:
-                    # Si hay emergencia, mantenemos la línea base original para seguir comparando contra la normalidad
-                    await self.state_adapter.save_state(db_url, baseline_sig, history, baseline_nodes, baseline_edges, baseline_semantics)
+                    await self.state_adapter.save_state(db_url, baseline_sig, history, baseline_nodes, baseline_edges, baseline_semantics, needs_reset=0)
                 
                 logger.info(f"Índice de Emergencia E(P,t): {emergence_index:.4f} | Persistencia: {is_emergence}")
+        
+        # Obtener el historial final actualizado (6 valores)
+        _, current_history, _, _, _, _ = await self.state_adapter.load_state(db_url)
         
         # 5. Explicabilidad (Fase C - Informe Ejecutivo)
         report = await self.orchestrator_adapter.generate_report(
@@ -140,5 +146,6 @@ class InferenceService:
             "emergence_index": emergence_index,
             "is_emergence": is_emergence,
             "validated_relationships": [f"{p.dependent.table_name}.{p.dependent.column_name} -[{p.semantic_label}]-> {p.referenced.table_name}.{p.referenced.column_name} (ρ={p.rho})" for p in ontologized_pinds],
-            "executive_report": report
+            "executive_report": report,
+            "emergence_history": current_history
         }

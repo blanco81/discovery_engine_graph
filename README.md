@@ -97,33 +97,9 @@ El proyecto utiliza una Arquitectura Hexagonal (Ports and Adapters) para mantene
 - **Persistencia Grafo:** Neo4j.
 - **Acceso a Datos:** SQLAlchemy (Inferencia a ciegas por reflection).
 - **Orquestación IA:** LangGraph, LangChain.
-- **Motor LLM:** Llama 3.3 70B (vía API de Groq).
+- **Motor LLM:** llama-3.1-8b-instant (Para desarrollo) (vía API de Groq).
 - **Cálculo Científico:** NumPy, SciPy, NetworkX, scikit-learn.
 
-# Estructura del Proyecto
-discovery_engine_graph/
-├── app/
-│   ├── adapters/                  # Adaptadores de infraestructura
-│   │   ├── agents/                # Adaptadores de LLM (LangGraph)
-│   │   │   └── langgraph_adapter.py
-│   │   ├── db/                    # Adaptadores de base de datos
-│   │   │   ├── sqlalchemy_adapter.py
-│   │   │   └── neo4j_adapter.py
-│   │   └── driving/               # Adaptadores de entrada (API)
-│   │       └── api/
-│   │           └── routes.py
-│   ├── core/                      # NÚCLEO DE LA APLICACIÓN (Puro)
-│   │   ├── domain/                # Entidades y matemáticas
-│   │   │   ├── emergence.py       # Motor espectral y persistencia
-│   │   │   ├── metrics.py         # NetSimile y Jensen-Shannon
-│   │   │   └── models.py          # Perfil Dinámico, pINDs
-│   │   ├── ports/                 # Interfaces (Contratos)
-│   │   └── services/              # Casos de uso (Orquestación)
-│   ├── config/                    # Carga de entorno (.env)
-│   └── main.py                    # Punto de entrada FastAPI
-├── tests/
-├── .env
-└── requirements.txt
 
 # Guía de Instalación y Ejecución
 # 1. Requisitos Previos
@@ -138,17 +114,14 @@ source venv/bin/activate  # En Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 Configura tu archivo .env en la raíz del proyecto:
-# --- Fase A: Pozo Relacional (RDBMS) ---
-RDBMS_URL=sqlite:///./test_blind.db
-
 # --- Fase B: Grafo Dinámico (Neo4j) ---
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=tu_password
 
 # --- Fase C: Orquestación de Agentes (LLM) ---
-LLM_PROVIDER=groq
-LLM_MODEL_NAME=llama-3
+LLM_PROVIDER=groq (Para desarrollo)
+LLM_MODEL_NAME=modelo_llm
 LLM_API_KEY=gsk_tu_api_key_de_groq_aqui
 
 # --- API ---
