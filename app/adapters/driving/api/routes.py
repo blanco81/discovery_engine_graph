@@ -117,15 +117,52 @@ async def get_dashboard():
 
         <script>
             let chart;
+            let emergenceHistory = []; // Acumulador global para la serie temporal
+            let iterationCount = 0;    // Contador de ejecuciones
             const ctx = document.getElementById('emergenceChart').getContext('2d');
             
-            // Inicializar gráfico vacío
+            // Inicializar gráfico con configuración mejorada
             function initChart() {
                 if(chart) chart.destroy();
                 chart = new Chart(ctx, {
                     type: 'line',
-                    data: { labels: [], datasets: [{ label: 'E(P,t)', data: [], borderColor: 'rgb(75, 85, 99)', tension: 0.1, fill: true }] },
-                    options: { scales: { y: { beginAtZero: true } } }
+                    data: { 
+                        labels: [], 
+                        datasets: [
+                            { 
+                                label: 'E(P,t) - Índice de Emergencia', 
+                                data: [], 
+                                borderColor: 'rgb(79, 70, 229)', 
+                                backgroundColor: 'rgba(79, 70, 229, 0.2)',
+                                tension: 0.3, 
+                                fill: true,
+                                borderWidth: 3,
+                                pointRadius: 5,
+                                pointBackgroundColor: 'rgb(79, 70, 229)'
+                            },
+                            {
+                                label: 'Umbral θ (0.15)',
+                                data: [],
+                                borderColor: 'rgb(220, 38, 38)',
+                                borderDash: [5, 5],
+                                fill: false,
+                                pointRadius: 0,
+                                borderWidth: 2
+                            }
+                        ] 
+                    },
+                    options: { 
+                        scales: { 
+                            y: { beginAtZero: true, suggestedMax: 0.3 } // Max sugerido para ver bien el umbral
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'bottom',
+                                labels: { font: { size: 10 } }
+                            }
+                        }
+                    }
                 });
             }
             initChart();
@@ -162,7 +199,12 @@ async def get_dashboard():
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ db_url: dbUrl })
                 });
-                alert("Línea base reseteada. Ejecuta de nuevo para aprender la nueva normalidad.");
+                
+                // Limpiar la gráfica cuando se resetea la línea base
+                emergenceHistory = [];
+                iterationCount = 0;
+                initChart();
+                alert("Línea base reseteada. La gráfica se ha limpiado. Ejecuta de nuevo para aprender la nueva normalidad.");
             }
 
             function renderData(data) {
@@ -186,8 +228,9 @@ async def get_dashboard():
                 document.getElementById('metrics').innerHTML = `
                     <p><b>Relaciones Matemáticas (pINDs):</b> ${data.total_raw_pinds}</p>
                     <p><b>Relaciones Validadas (IA):</b> ${data.total_validated_pinds}</p>
-                    <p><b>Índice de Emergencia:</b> ${ept.toFixed(4)}</p>
+                    <p><b>Índice de Emergencia Actual:</b> ${ept.toFixed(4)}</p>
                     <p><b>Umbral (θ):</b> 0.1500</p>
+                    <p><b>Iteración Actual:</b> t=${iterationCount + 1}</p>
                 `;
 
                 // 3. Reporte
@@ -245,17 +288,17 @@ async def get_dashboard():
                     layout: { name: 'cose' }
                 });
 
-                // 5. Gráfico (Chart.js)
-                initChart();
-                chart.data.labels.push('Actual');
-                chart.data.datasets[0].data.push(ept);
-                chart.data.datasets.push({
-                    label: 'Umbral θ (0.15)',
-                    data: [0.15],
-                    borderColor: 'rgb(220, 38, 38)',
-                    borderDash: [5, 5],
-                    fill: false
-                });
+                // 5. Gráfico (Chart.js) - Actualización de la Serie Temporal
+                iterationCount++;
+                emergenceHistory.push(ept);
+                
+                // Actualizar labels y datos del gráfico sin destruirlo
+                chart.data.labels.push(`t=${iterationCount}`);
+                chart.data.datasets[0].data = emergenceHistory;
+                
+                // Mantener la línea del umbral del mismo tamaño que el historial
+                chart.data.datasets[1].data = new Array(emergenceHistory.length).fill(0.15);
+                
                 chart.update();
             }
         </script>

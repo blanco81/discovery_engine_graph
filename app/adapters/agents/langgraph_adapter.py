@@ -199,47 +199,51 @@ class LangGraphAdapter(OrchestratorPort):
         return final_pinds
 
     async def generate_report(self, pinds: List[PartialInclusionDependency], emergence_index: float, is_emergence: bool, emergence_details: str = "") -> str:
-        # En lugar de mostrar la matemática cruda, la traducimos a conceptos de riesgo
+        table_names = set([p.dependent.table_name for p in pinds] + [p.referenced.table_name for p in pinds])
+        pinds_str = "\n".join([f"- {p.dependent.table_name} se conecta con {p.referenced.table_name} ({p.semantic_label})" for p in pinds[:15]])
+        
         if is_emergence:
             tone_directive = f"""
-            ¡ALERTA CRÍTICA DE NEGOCIO! Se ha detectado un Patrón Emergente Persistente.
-            El sistema ha cambiado de régimen. El tono debe ser de alerta temprana para directivos.
+            ¡ALERTA CRÍTICA! Se ha detectado un Patrón Emergente Persistente.
+            El sistema ha cambiado de régimen. 
             
-            Evidencia Interna (TRADÚCELA a lenguaje de negocio, NO uses términos matemáticos):
+            Evidencia Matemática Interna (NO la menciones, úsala para inferir):
             {emergence_details}
             
-            Instrucciones de Redacción OBLIGATORIAS (Usa este formato exacto):
-            1. 🚨 **Estado del Sistema:** (1 frase indicando alerta de cambio operativo).
-            2. 🔍 **Hallazgo Principal:** (Explica en español simple qué surgió. Si hay 'Nodos Nuevos', diles que apareció una nueva área de negocio/proceso. Si hay 'Alerta Semántica', diles que el comportamiento de los datos existentes mutó drásticamente, como un brote o una falla masiva).
-            3. 🏢 **Impacto en la Operación:** (Basado en los nombres de las tablas, explica cómo afecta esto a la vida real: estudiantes, pacientes, recursos, etc.).
-            4. 📋 **Recomendación Inmediata:** (1 o 2 acciones concretas que el gerente debería hacer hoy).
+            Tablas presentes en el ecosistema: {', '.join(table_names)}
+            
+            Instrucciones de Redacción ESTRATÉGICA (Usa este formato exacto):
+            0. 🎯 **Contexto del Dominio:** (Analiza los nombres de las tablas. Deduce si es salud, retail, educación, finanzas, seguridad, etc. A partir de ahora, usa EXCLUSIVAMENTE el vocabulario de ese dominio).
+            1. 🚨 **Nivel de Alerta y Régimen:** (1 frase indicando que el sistema ha roto la línea base histórica y entró en un nuevo régimen macroscópico en este dominio).
+            2. 🧠 **Síntesis Estratégica (Cruce de Variables):** (REGLA CRÍTICA: NO te limites a decir "salió una tabla nueva". Si hay Nodos Nuevos y Concept Drift al mismo tiempo, EXPLICA cómo se relacionan. ¿Qué significa para este dominio que esta nueva estructura aparezca justo cuando los datos existentes mutan? Deduce el plan de acción subyacente de los actores/pacientes/clientes involucrados).
+            3. 🎯 **Proyección de Riesgo:** (Predice qué podría pasar en la vida real en las próximas horas/días si no se actúa. Usa vocabulario de riesgo específico del dominio deducido).
+            4. ⚡ **Directivas Inmediatas:** (2 o 3 órdenes ejecutivas de alto nivel para mitigar el riesgo. No digas "revisar la base de datos". Da órdenes de acción reales: ej. en salud "aislar pacientes", en retail "bloquear inventario", en seguridad "movilizar recursos").
             """
         else:
             tone_directive = """
             El sistema se encuentra ESTABLE. 
-            Redacta un resumen ejecutivo corto y tranquilizador.
-            1. ✅ **Estado del Sistema:** (Indica que la operación está normal).
-            2. 🔍 **Monitoreo Activo:** (Menciona brevemente cuántas estructuras de datos se están vigilando).
+            Redacta un resumen ejecutivo corto y tranquilizador usando el vocabulario del dominio deducido.
+            1. ✅ **Estado del Sistema:** (Indica que la operación está normal y bajo control).
+            2. 🔍 **Monitoreo Activo:** (Menciona brevemente cuántas estructuras de datos se están vigilando pasivamente).
             """
 
-        # Simplificamos la lista de relaciones para que el LLM no se enrede
-        pinds_str = "\n".join([f"- {p.dependent.table_name} se conecta con {p.referenced.table_name}" for p in pinds[:10]])
-        
         prompt = f"""
-        Eres el Analista Principal de Inteligencia de Datos para un Directorio Ejecutivo.
-        Tu trabajo es traducir descubrimientos técnicos en informes pragmáticos de 1 página.
+        Eres un Strategic Risk Officer (Director de Riesgos Estratégicos).
+        Tu trabajo no es describir datos, sino inferir intenciones, riesgos estratégicos y traducir la evidencia matemática en directivas ejecutivas para un comité de crisis.
         
         Contexto de Datos Vigilados:
+        Tablas detectadas: {', '.join(table_names)}
+        Relaciones descubiertas:
         {pinds_str}
         
         Directriz de Redacción:
         {tone_directive}
         
-        NO menciones índices matemáticos, ni Jensen-Shannon, ni autovalores, ni pINDs. Habla de "procesos", "comportamiento de datos" y "áreas de negocio".
+        NO menciones índices matemáticos, ni Jensen-Shannon, ni autovalores. Habla de "síntesis operacional", "riesgo" y "régimen".
         """
         
         msg = await self.llm.ainvoke([
-            SystemMessage(content="Eres un Chief Data Officer redactando un informe ejecutivo pragmático."),
+            SystemMessage(content="Eres un analista estratégico de élite. Piensas como un experto en gestión de riesgos. Eres directo, analítico y no alucinas dominios."),
             HumanMessage(content=prompt)
         ])
         return msg.content
