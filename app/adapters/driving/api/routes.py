@@ -11,6 +11,8 @@ router = APIRouter()
 class DiscoveryRequest(BaseModel):
     db_url: str
     rho_threshold: Optional[float] = 0.90
+    domain: Optional[str] = "auto"
+    language: Optional[str] = "es"
 
 @router.get("/")
 async def read_root():
@@ -27,7 +29,9 @@ async def run_discovery(request: DiscoveryRequest):
     try:
         result = await service.run_discovery_pipeline(
             db_url=request.db_url,
-            rho_threshold=request.rho_threshold
+            rho_threshold=request.rho_threshold,
+            domain=request.domain,
+            language=request.language
         )
         return {
             "message": "Pipeline completado",
@@ -60,7 +64,6 @@ async def get_dashboard():
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.27.0/cytoscape.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <!-- Añadimos el plugin de Zoom y su dependencia Hammer.js -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
         <style>
@@ -72,18 +75,48 @@ async def get_dashboard():
 
         <div class="container mx-auto p-6">
             <!-- Cabecera -->
-            <div class="flex justify-between items-center mb-6">
+            <div class="flex flex-wrap justify-between items-center mb-6 gap-4">
                 <h1 class="text-3xl font-bold text-indigo-900">🧠 Motor de Descubrimiento de Complejidad</h1>
-                <div class="flex gap-4">
-                    <input id="dbUrl" type="text" placeholder="postgresql://user:pass@localhost:5432/db" class="border p-2 rounded w-96 text-sm">
-                    <button onclick="runDiscovery()" class="bg-indigo-600 text-white px-4 py-2 rounded font-bold hover:bg-indigo-700">Ejecutar</button>
-                    <button onclick="resetBaseline()" class="bg-gray-500 text-white px-4 py-2 rounded font-bold hover:bg-gray-600">Resetear</button>
+                <div class="flex gap-2 items-center">
+                    <input id="dbUrl" type="text" placeholder="postgresql://user:pass@localhost:5432/db" class="border p-2 rounded w-80 text-sm">
+                    <select id="domainSelect" class="border p-2 rounded text-sm bg-white">
+                        <option value="auto">Auto Domain</option>
+                        <option value="education">Education</option>
+                        <option value="ecommerce">E-commerce</option>
+                        <option value="salud">Salud</option>
+                        <option value="hospitalar">Hospitalar</option>
+                        <option value="agronegocios">Agronegocios</option>
+                        <option value="agricultura">Agricultura</option>
+                        <option value="legal">Legal</option>
+                        <option value="farmacologia">Farmacología</option>
+                        <option value="logistica">Logística</option>
+                        <option value="transporte">Transporte</option>
+                        <option value="construccion">Construcción</option>
+                        <option value="empresarial">Empresarial</option>
+                        <option value="gestion_documental">Gestión Doc.</option>
+                        <option value="financiero">Financiero</option>
+                        <option value="contabilidad">Contabilidad</option>
+                        <option value="bancario">Bancario</option>
+                        <option value="policial">Policial</option>
+                    </select>
+                    <select id="langSelect" class="border p-2 rounded text-sm bg-white">
+                        <option value="es">Español</option>
+                        <option value="en">English</option>
+                        <option value="pt">Português</option>
+                    </select>
+                    <button onclick="runDiscovery()" class="bg-indigo-600 text-white px-4 py-2 rounded font-bold hover:bg-indigo-700 text-sm">Ejecutar</button>
+                    <button onclick="resetBaseline()" class="bg-gray-500 text-white px-4 py-2 rounded font-bold hover:bg-gray-600 text-sm">Resetear</button>
                 </div>
             </div>
 
             <!-- Semáforo de Alerta -->
-            <div id="alertBox" class="bg-green-100 text-green-800 p-4 rounded-lg mb-6 text-center font-bold text-xl transition-all">
+            <div id="alertBox" class="bg-green-100 text-green-800 p-4 rounded-lg mb-2 text-center font-bold text-xl transition-all">
                 ✅ Sistema Estable - Esperando ejecución...
+            </div>
+            
+            <!-- Alerta de Mismatch de Dominio (NUEVO) -->
+            <div id="domainWarningBox" class="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 p-3 rounded mb-6 text-sm hidden">
+                <span id="domainWarningText"></span>
             </div>
 
             <!-- Cuadrantes (Layout 2 Columnas Igualadas) -->
@@ -95,9 +128,12 @@ async def get_dashboard():
                 </div>
                 <!-- Serie Temporal Ampliada -->
                 <div class="bg-white p-4 rounded-lg shadow border">
-                    <h2 class="text-xl font-semibold mb-2 text-gray-700">Serie Temporal de Emergencia</h2>
-                    <p class="text-xs text-gray-400 mb-2">💡 Usa la rueda del ratón para hacer zoom y arrastra para desplazarte.</p>
-                    <div style="height: 450px;">
+                    <div class="flex justify-between items-center mb-2">
+                        <h2 class="text-xl font-semibold text-gray-700">Serie Temporal de Emergencia</h2>
+                        <button onclick="resetZoom()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded">Restablecer Zoom</button>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-2">💡 Rueda del ratón: Zoom. Clic y arrastrar: Desplazar.</p>
+                    <div style="height: 430px;">
                         <canvas id="emergenceChart"></canvas>
                     </div>
                 </div>
@@ -115,18 +151,17 @@ async def get_dashboard():
                 <!-- Reporte IA -->
                 <div class="col-span-2 bg-white p-4 rounded-lg shadow border">
                     <h2 class="text-xl font-semibold mb-2 text-gray-700">Informe Ejecutivo IA</h2>
-                    <div id="report" class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded border">
+                    <div id="report" class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded border max-h-96 overflow-y-auto">
                         El informe aparecerá aquí...
                     </div>
                 </div>
             </div>
         </div>
 
-                <script>
+        <script>
             let chart;
             const ctx = document.getElementById('emergenceChart').getContext('2d');
             
-            // Registramos el plugin de zoom explícitamente para asegurar que funcione
             if (window.ChartZoom) {
                 Chart.register(ChartZoom);
             }
@@ -173,16 +208,8 @@ async def get_dashboard():
                         plugins: {
                             legend: { display: true, position: 'bottom', labels: { font: { size: 10 } } },
                             zoom: {
-                                pan: {
-                                    enabled: true,
-                                    mode: 'x',
-                                    // Eliminamos el modifierKey para que arrastre con clic normal
-                                },
-                                zoom: {
-                                    wheel: { enabled: true, speed: 0.1 },
-                                    pinch: { enabled: true },
-                                    mode: 'x',
-                                }
+                                pan: { enabled: true, mode: 'x' },
+                                zoom: { wheel: { enabled: true, speed: 0.1 }, pinch: { enabled: true }, mode: 'x' }
                             }
                         }
                     }
@@ -199,14 +226,18 @@ async def get_dashboard():
                 const dbUrl = document.getElementById('dbUrl').value;
                 if(!dbUrl) return alert("Por favor ingresa la URL de la BD");
                 
+                const domain = document.getElementById('domainSelect').value;
+                const lang = document.getElementById('langSelect').value;
+                
                 document.getElementById('alertBox').textContent = "⏳ Procesando pipeline matemático y agentes IA...";
-                document.getElementById('alertBox').className = "bg-yellow-100 text-yellow-800 p-4 rounded-lg mb-6 text-center font-bold text-xl animate-pulse";
+                document.getElementById('alertBox').className = "bg-yellow-100 text-yellow-800 p-4 rounded-lg mb-2 text-center font-bold text-xl animate-pulse";
+                document.getElementById('domainWarningBox').classList.add('hidden');
 
                 try {
                     const res = await fetch('/api/v1/discovery/run', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ db_url: dbUrl, rho_threshold: 0.9 })
+                        body: JSON.stringify({ db_url: dbUrl, rho_threshold: 0.9, domain: domain, language: lang })
                     });
                     const data = await res.json();
                     if(!res.ok) throw new Error(data.detail || "Error en la API");
@@ -214,7 +245,7 @@ async def get_dashboard():
                     renderData(data.data);
                 } catch (e) {
                     document.getElementById('alertBox').textContent = "❌ Error: " + e.message;
-                    document.getElementById('alertBox').className = "bg-red-100 text-red-800 p-4 rounded-lg mb-6 text-center font-bold text-xl";
+                    document.getElementById('alertBox').className = "bg-red-100 text-red-800 p-4 rounded-lg mb-2 text-center font-bold text-xl";
                 }
             }
 
@@ -238,13 +269,21 @@ async def get_dashboard():
                 
                 if(isEm) {
                     alert.textContent = `🚨 ALERTA: Cambio de Régimen Detectado | E(P,t): ${ept.toFixed(4)}`;
-                    alert.className = "bg-red-100 text-red-800 p-4 rounded-lg mb-6 text-center font-bold text-xl animate-pulse";
+                    alert.className = "bg-red-100 text-red-800 p-4 rounded-lg mb-2 text-center font-bold text-xl animate-pulse";
                 } else if(ept > 0.05) {
                     alert.textContent = `⏳ Anomalía Detectada (Esperando Persistencia) | E(P,t): ${ept.toFixed(4)}`;
-                    alert.className = "bg-orange-100 text-orange-800 p-4 rounded-lg mb-6 text-center font-bold text-xl";
+                    alert.className = "bg-orange-100 text-orange-800 p-4 rounded-lg mb-2 text-center font-bold text-xl";
                 } else {
                     alert.textContent = `✅ Sistema Estable | E(P,t): ${ept.toFixed(4)}`;
-                    alert.className = "bg-green-100 text-green-800 p-4 rounded-lg mb-6 text-center font-bold text-xl";
+                    alert.className = "bg-green-100 text-green-800 p-4 rounded-lg mb-2 text-center font-bold text-xl";
+                }
+
+                // 1.5 Alerta de Dominio (NUEVO)
+                if(data.domain_warning) {
+                    document.getElementById('domainWarningText').innerText = data.domain_warning;
+                    document.getElementById('domainWarningBox').classList.remove('hidden');
+                } else {
+                    document.getElementById('domainWarningBox').classList.add('hidden');
                 }
 
                 // 2. Métricas
@@ -253,6 +292,7 @@ async def get_dashboard():
                     <p><b>Relaciones Validadas (IA):</b> ${data.total_validated_pinds}</p>
                     <p><b>Índice de Emergencia Actual:</b> ${ept.toFixed(4)}</p>
                     <p><b>Umbral (θ):</b> 0.1500</p>
+                    <p><b>Dominio Aplicado:</b> ${data.domain_used || 'N/A'}</p>
                 `;
 
                 // 3. Reporte

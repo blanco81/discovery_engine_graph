@@ -13,7 +13,7 @@ STATE_FILE = "system_state.json"
 class EmergenceEngine:
     """
     Motor matemático para detectar Patrones Emergentes Persistentes (Pilar 3).
-    Basado en teoría espectral y persistencia temporal (Wolfram/Bar-Yam).
+    Basado en teoría espectral, persistencia temporal y Control Estadístico de Procesos (SPC).
     """
 
     def calculate_spectral_signature(self, graph: nx.Graph, k: int = 8) -> List[float]:
@@ -51,7 +51,28 @@ class EmergenceEngine:
         
         return float(normalized_ds)
 
-    def validate_persistence(self, emergence_history: List[float], threshold: float = 0.15, window: int = 3) -> bool:
+    def calculate_adaptive_threshold(self, history: List[float], window: int = 3, warmup: int = 5) -> float:
+        """
+        Calcula el Umbral Adaptativo (theta_adaptive) basado en Control Estadístico de Procesos.
+        Fórmula: mu + k * sigma (Regla de los 3 sigmas).
+        Excluye la ventana actual para no sesgar el ruido de fondo con la anomalía presente.
+        """
+        # Excluimos las últimas 'window' iteraciones para calcular el ruido de fondo
+        baseline_history = history[:-window] if len(history) > window else history
+        
+        if len(baseline_history) < warmup:
+            # Si no hay suficiente historial (fase de calentamiento), usamos un umbral fijo base
+            return 0.15
+        
+        history_np = np.array(baseline_history)
+        mu = np.mean(history_np)
+        sigma = np.std(history_np)
+        
+        # k = 3.0 (Regla de 3 sigmas). Si sigma es 0, usamos un piso mínimo de 0.001
+        adaptive_theta = mu + 3.0 * sigma if sigma > 0 else 0.001
+        return float(adaptive_theta)
+
+    def validate_persistence(self, emergence_history: List[float], threshold: float, window: int = 3) -> bool:
         """
         Valida si una emergencia es persistente en el tiempo.
         Requerimiento de Pilar 3: No es una anomalía puntual, es un cambio de régimen.
@@ -61,13 +82,17 @@ class EmergenceEngine:
             
         recent_history = emergence_history[-window:]
         
+        # Condición 1: Todos los pasos recientes deben superar el umbral (que ahora es adaptativo)
         all_above_threshold = all(e > threshold for e in recent_history)
+        
+        # Condición 2: Coherencia modal (Baja varianza reciente)
         variance = np.var(recent_history)
         is_stable = variance < (threshold * 0.5)
         
         # Forzamos la conversión a bool nativo de Python para que FastAPI pueda serializarlo
         return bool(all_above_threshold and is_stable)
 
+    # --- Métodos de persistencia en JSON (Legacy/Fallback) ---
     def save_state(self, baseline_sig: List[float], history: List[float], baseline_nodes: List[str] = None, baseline_edges: List[Tuple[str, str]] = None, baseline_semantics: dict = None):
         """Guarda la línea base, el historial, la topología y la semántica en un JSON."""
         with open(STATE_FILE, 'w') as f:

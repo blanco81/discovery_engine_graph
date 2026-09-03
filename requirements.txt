@@ -23,3 +23,4 @@ streamlit
 requests 
 plotly 
 streamlit-agraph
+langchain-google-genai
