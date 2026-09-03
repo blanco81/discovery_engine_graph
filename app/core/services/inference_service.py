@@ -6,6 +6,7 @@ from app.adapters.db.neo4j_adapter import Neo4jAdapter
 from app.adapters.db.state_adapter import InternalStateAdapter
 from app.core.domain.emergence import EmergenceEngine
 from app.core.domain.metrics import calculate_js_distance
+from app.core.services.domain_router import DomainRouter
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,9 @@ class InferenceService:
         self.neo4j_adapter = Neo4jAdapter()
         self.emergence_engine = EmergenceEngine()
         self.state_adapter = InternalStateAdapter()
+        self.domain_router = DomainRouter()
 
-    async def run_discovery_pipeline(self, db_url: str, rho_threshold: float = 0.90) -> dict:
+    async def run_discovery_pipeline(self, db_url: str, rho_threshold: float = 0.90, domain: str = "auto", language: str = "es") -> dict:
         logger.info("Iniciando pipeline asíncrono completo (Etapas 1 a 4)...")
         
         # Asegurar que la tabla de estado interno existe
@@ -35,14 +37,28 @@ class InferenceService:
         semantic_distributions = await db_adapter.get_categorical_distributions(columns)
         await db_adapter.disconnect()
         
+        # 1.5 DETECCIÓN DE DOMINIO Y VALIDACIÓN CRUZADA
+        inferred_domain = self.domain_router.detect_domain(columns)
+        domain_warning = ""
+        
+        if domain and domain != "auto":
+            domain_name = domain
+            if domain != inferred_domain and inferred_domain != "generic":
+                logger.warning(f"Conflicto de dominio: Forzado='{domain}', Inferido='{inferred_domain}'")
+                domain_warning = f"⚠️ Mismatch de Dominio: Forzaste '{domain}', pero las tablas inferidas sugieren '{inferred_domain}'. El análisis de IA puede verse afectado."
+        else:
+            domain_name = inferred_domain
+            
+        domain_profile = self.domain_router.get_profile(domain_name)
+        
         # 2. Validación Multi-Agente (Fase B - LLM)
-        validated_pinds = await self.orchestrator_adapter.validate_pinds(raw_pinds)
+        validated_pinds = await self.orchestrator_adapter.validate_pinds(raw_pinds, domain_profile)
         ontologized_pinds = []
         graph = None
         
         # 3. Materialización y Extracción del Grafo (Neo4j)
         if validated_pinds:
-            ontologized_pinds = await self.orchestrator_adapter.generate_ontology(validated_pinds)
+            ontologized_pinds = await self.orchestrator_adapter.generate_ontology(validated_pinds, domain_profile)
             await self.neo4j_adapter.connect()
             await self.neo4j_adapter.save_pinds(ontologized_pinds)
             graph = await self.neo4j_adapter.get_networkx_graph()
@@ -137,7 +153,8 @@ class InferenceService:
             pinds=ontologized_pinds,
             emergence_index=emergence_index,
             is_emergence=is_emergence,
-            emergence_details=emergence_details
+            emergence_details=emergence_details,
+            language=language
         )
         
         return {
@@ -147,5 +164,7 @@ class InferenceService:
             "is_emergence": is_emergence,
             "validated_relationships": [f"{p.dependent.table_name}.{p.dependent.column_name} -[{p.semantic_label}]-> {p.referenced.table_name}.{p.referenced.column_name} (ρ={p.rho})" for p in ontologized_pinds],
             "executive_report": report,
-            "emergence_history": current_history
+            "emergence_history": current_history,
+            "domain_used": domain_name,
+            "domain_warning": domain_warning
         }
